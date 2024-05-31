@@ -1,0 +1,64 @@
+name: Create and publish artifacts
+run-name: Build ${{ github.event.inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tailscale release'
+        required: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: tailscale/tailscale
+          ref: ${{ github.event.inputs.version }}
+
+      - name: Setup Golang
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Download module dependencies
+        run: go mod download
+      
+      - name: Build derper
+        run: |
+          go build -ldflags="\
+            -X tailscale.com/version.longStamp=${{ github.event.inputs.version }} \
+            -X tailscale.com/version.shortStamp=${{ github.event.inputs.version }} \
+            -X tailscale.com/version.gitCommitStamp=${{ github.sha }}" \
+            -o build/derper ./cmd/derper
+
+      - name: Build derpprobe
+        run: |
+          go build -ldflags="\
+            -X tailscale.com/version.longStamp=${{ github.event.inputs.version }} \
+            -X tailscale.com/version.shortStamp=${{ github.event.inputs.version }} \
+            -X tailscale.com/version.gitCommitStamp=${{ github.sha }}" \
+            -o build/derpprobe ./cmd/derpprobe
+
+      - name: Upload derper binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./build/derper
+          asset_name: derper
+          tag: ${{ github.event.inputs.version }}
+          overwrite: true
+
+      - name: Upload derpprobe binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ./build/derpprobe
+          asset_name: derpprobe
+          tag: ${{ github.event.inputs.version }}
+          overwrite: true
