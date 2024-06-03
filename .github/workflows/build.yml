@@ -14,6 +14,16 @@ jobs:
     permissions:
       contents: write
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        binary:
+          [
+            derper,
+            derpprobe,
+            tailscaled,
+            tailscale
+          ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,36 +39,19 @@ jobs:
       - name: Download module dependencies
         run: go mod download
       
-      - name: Build derper
+      - name: Build
         run: |
           go build -ldflags="\
             -X tailscale.com/version.longStamp=${{ github.event.inputs.version }} \
             -X tailscale.com/version.shortStamp=${{ github.event.inputs.version }} \
             -X tailscale.com/version.gitCommitStamp=${{ github.sha }}" \
-            -o build/derper ./cmd/derper
+            -o build/${{ matrix.binary }} ./cmd/${{ matrix.binary }}
 
-      - name: Build derpprobe
-        run: |
-          go build -ldflags="\
-            -X tailscale.com/version.longStamp=${{ github.event.inputs.version }} \
-            -X tailscale.com/version.shortStamp=${{ github.event.inputs.version }} \
-            -X tailscale.com/version.gitCommitStamp=${{ github.sha }}" \
-            -o build/derpprobe ./cmd/derpprobe
-
-      - name: Upload derper binaries to release
+      - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ./build/derper
-          asset_name: derper
-          tag: ${{ github.event.inputs.version }}
-          overwrite: true
-
-      - name: Upload derpprobe binaries to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ./build/derpprobe
-          asset_name: derpprobe
+          file: ./build/${{ matrix.binary }}
+          asset_name: ${{ matrix.binary }}
           tag: ${{ github.event.inputs.version }}
           overwrite: true
