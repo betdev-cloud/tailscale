@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import subprocess
 import sys
 
 import requests
@@ -26,16 +27,38 @@ def fork_tag_names(session):
 
 
 def create_fork_tag(tag_name, sha, session):
-    response = session.post(
-        f"https://api.github.com/repos/{FORK_OWNER}/{FORK_REPO}/git/refs",
-        json={"ref": f"refs/tags/{tag_name}", "sha": sha},
+    # The upstream release tag can point to an object missing from the fork.
+    # Mirror the tag through git so the referenced object is transferred too.
+    del sha, session
+    upstream_url = f"https://github.com/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
+    remotes = subprocess.run(
+        ["git", "remote"],
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    if response.status_code == 201:
+    if "upstream" not in remotes.stdout.split():
+        subprocess.run(
+            ["git", "remote", "add", "upstream", upstream_url],
+            check=True,
+        )
+
+    subprocess.run(
+        ["git", "fetch", "--depth=1", "upstream", f"refs/tags/{tag_name}:refs/tags/{tag_name}"],
+        check=True,
+    )
+
+    push = subprocess.run(
+        ["git", "push", "origin", f"refs/tags/{tag_name}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if push.returncode == 0:
         return True
-    if response.status_code == 422 and "Reference already exists" in response.text:
+    if "already exists" in (push.stdout + push.stderr):
         return False
-    response.raise_for_status()
-    return True
+    raise RuntimeError(f"Failed to push tag {tag_name}: {push.stderr or push.stdout}")
 
 
 def trigger_build(tag_name, session):
