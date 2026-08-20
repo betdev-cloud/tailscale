@@ -19,9 +19,9 @@ Fork-репозиторий для автоматической сборки б�
 ### Локальный запуск
 
 ```bash
-python -m pip install requests
-python fetch_changelog.py v1.102.3
-python fetch_changelog.py v1.102.3 -o release-notes.md
+uv sync
+uv run python fetch_changelog.py v1.102.3
+uv run python fetch_changelog.py v1.102.3 -o release-notes.md
 ```
 
 Пример вывода для `v1.102.3`:
@@ -60,7 +60,7 @@ Workflow `Create and publish artifacts` можно запустить вручн
 Для pull request в `sync-tags.yml` добавлен отдельный job `sync_tags_dry_run`, который запускает:
 
 ```bash
-python sync_tags.py --dry-run
+uv run python sync_tags.py --dry-run
 ```
 
 В этом режиме скрипт получает список тегов из upstream, определяет последний новый stable-тег и выводит план действий, но **не**:

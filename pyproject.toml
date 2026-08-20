@@ -1,0 +1,9 @@
+[project]
+name = "tailscale-fork-automation"
+version = "0.1.0"
+description = "Automation scripts for tag sync and release notes."
+requires-python = ">=3.11"
+dependencies = [
+  "requests",
+]
+

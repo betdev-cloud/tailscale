@@ -27,13 +27,20 @@ jobs:
         with:
           python-version: 3.x
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+
       - name: Install dependencies
         run: |
-          python -m pip install requests
+          uv sync
 
       - name: Run sync in dry-run mode
         run: |
-          python sync_tags.py --dry-run
+          uv run python sync_tags.py --dry-run
+
+      - name: Run unit tests
+        run: |
+          uv run python -m unittest discover -s tests -p "test_*.py"
 
   sync_tags:
     if: github.event_name != 'pull_request'
@@ -51,12 +58,15 @@ jobs:
         with:
           python-version: 3.x
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+
       - name: Install dependencies
         run: |
-          python -m pip install requests
+          uv sync
 
       - name: Sync tags
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python sync_tags.py
+          uv run python sync_tags.py

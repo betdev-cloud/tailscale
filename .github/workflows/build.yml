@@ -26,15 +26,18 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+
       - name: Install dependencies
-        run: python -m pip install requests
+        run: uv sync
 
       - name: Resolve upstream commit and Go version
         id: upstream
         env:
           VERSION: ${{ github.event.inputs.version }}
         run: |
-          python <<'PY'
+          uv run python <<'PY'
           import os
           import re
           import requests
@@ -77,7 +80,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ github.event.inputs.version }}
         run: |
-          python fetch_changelog.py "$VERSION" -o release-notes.md
+          uv run python fetch_changelog.py "$VERSION" -o release-notes.md
           echo "release_body_path=release-notes.md" >> "$GITHUB_OUTPUT"
 
       - name: Upload release notes
