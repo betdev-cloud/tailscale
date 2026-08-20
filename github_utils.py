@@ -101,3 +101,12 @@ def previous_release_tag(tag_name, tags):
     if index == 0:
         return None
     return release_tags[index - 1]
+
+
+def get_latest_release_tag(owner, repo, session):
+    """
+    Return the latest published GitHub release tag name for the repository.
+    """
+    response = session.get(f"https://api.github.com/repos/{owner}/{repo}/releases/latest")
+    response.raise_for_status()
+    return response.json()["tag_name"]
