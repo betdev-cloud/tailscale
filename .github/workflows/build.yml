@@ -5,11 +5,89 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Tailscale release'
+        description: 'Tailscale release tag, e.g. v1.102.3'
         required: true
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_body_path: ${{ steps.changelog.outputs.release_body_path }}
+      upstream_sha: ${{ steps.upstream.outputs.upstream_sha }}
+      go_version: ${{ steps.upstream.outputs.go_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: python -m pip install requests
+
+      - name: Resolve upstream commit and Go version
+        id: upstream
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          python <<'PY'
+          import os
+          import re
+          import requests
+
+          version = os.environ["VERSION"].strip()
+          if not version.startswith("v"):
+              version = f"v{version}"
+
+          ref = requests.get(
+              f"https://api.github.com/repos/tailscale/tailscale/git/ref/tags/{version}",
+              headers={"Accept": "application/vnd.github+json"},
+          )
+          ref.raise_for_status()
+          obj = ref.json()["object"]
+          if obj["type"] == "commit":
+              sha = obj["sha"]
+          else:
+              tag = requests.get(obj["url"], headers={"Accept": "application/vnd.github+json"})
+              tag.raise_for_status()
+              sha = tag.json()["object"]["sha"]
+
+          go_mod = requests.get(
+              f"https://raw.githubusercontent.com/tailscale/tailscale/{sha}/go.mod"
+          )
+          go_mod.raise_for_status()
+          match = re.search(r"^go (\d+\.\d+(?:\.\d+)?)", go_mod.text, re.MULTILINE)
+          if not match:
+              raise SystemExit("Could not detect Go version from upstream go.mod")
+          go_version = match.group(1)
+
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a", encoding="utf-8") as handle:
+              handle.write(f"upstream_sha={sha}\n")
+              handle.write(f"go_version={go_version}\n")
+          PY
+
+      - name: Fetch upstream changelog
+        id: changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          python fetch_changelog.py "$VERSION" -o release-notes.md
+          echo "release_body_path=release-notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
   build-and-publish:
+    needs: prepare-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,26 +103,31 @@ jobs:
             tailscale
           ]
     steps:
-      - name: Checkout repository
+      - name: Checkout upstream source
         uses: actions/checkout@v4
         with:
           repository: tailscale/tailscale
           ref: ${{ github.event.inputs.version }}
 
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
       - name: Setup Golang
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version: ${{ needs.prepare-release.outputs.go_version }}
 
       - name: Download module dependencies
         run: go mod download
-      
+
       - name: Build
         run: |
           go build -ldflags="\
             -X tailscale.com/version.longStamp=${{ github.event.inputs.version }} \
             -X tailscale.com/version.shortStamp=${{ github.event.inputs.version }} \
-            -X tailscale.com/version.gitCommitStamp=${{ github.sha }}" \
+            -X tailscale.com/version.gitCommitStamp=${{ needs.prepare-release.outputs.upstream_sha }}" \
             -o build/${{ matrix.binary }} ./cmd/${{ matrix.binary }}
 
       - name: Upload binaries to release
@@ -55,3 +138,5 @@ jobs:
           asset_name: ${{ matrix.binary }}
           tag: ${{ github.event.inputs.version }}
           overwrite: true
+          body_path: release-notes.md
+          make_latest: true

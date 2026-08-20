@@ -1,64 +1,85 @@
-import requests
+#!/usr/bin/env python3
+"""Mirror upstream Tailscale release tags into this fork and trigger builds."""
+
 import os
-import re
+import sys
 
-REPO_A_OWNER = 'tailscale'
-REPO_A_NAME = 'tailscale'
-REPO_B_OWNER = 'betdev-cloud'
-REPO_B_NAME = 'tailscale'
+import requests
 
-headers = {
-  'Authorization': f'token {os.getenv("GITHUB_TOKEN")}',
-  'Accept': 'application/vnd.github.v3+json',
-}
+from github_utils import (
+    FORK_OWNER,
+    FORK_REPO,
+    UPSTREAM_OWNER,
+    UPSTREAM_REPO,
+    get_tag_commit_sha,
+    github_session,
+    list_tags,
+    parse_version,
+    sorted_release_tags,
+)
 
-response_a = requests.get(f'https://api.github.com/repos/{REPO_A_OWNER}/{REPO_A_NAME}/tags')
-tags_a = response_a.json()[:10]
 
-release_tags_a = [tag for tag in tags_a if not re.search(r'-pre', tag['name'])]
+def fork_tag_names(session):
+    tags = list_tags(FORK_OWNER, FORK_REPO, session)
+    return {tag["name"] for tag in tags}
 
-response_b = requests.get(f'https://api.github.com/repos/{REPO_B_OWNER}/{REPO_B_NAME}/tags', headers=headers)
-tags_b = response_b.json()[:10]
 
-release_tags_a_names = {tag['name'] for tag in release_tags_a}
-tags_b_names = {tag['name'] for tag in tags_b}
+def create_fork_tag(tag_name, sha, session):
+    response = session.post(
+        f"https://api.github.com/repos/{FORK_OWNER}/{FORK_REPO}/git/refs",
+        json={"ref": f"refs/tags/{tag_name}", "sha": sha},
+    )
+    if response.status_code == 201:
+        return True
+    if response.status_code == 422 and "Reference already exists" in response.text:
+        return False
+    response.raise_for_status()
+    return True
 
-new_tags = release_tags_a_names - tags_b_names
 
-if new_tags:
-  latest_tag = sorted(new_tags)[-1]
-  print(f'Latest tag: {latest_tag}')
+def trigger_build(tag_name, session):
+    response = session.post(
+        f"https://api.github.com/repos/{FORK_OWNER}/{FORK_REPO}/actions/workflows/build.yml/dispatches",
+        json={"ref": "main", "inputs": {"version": tag_name}},
+    )
+    if response.status_code != 204:
+        response.raise_for_status()
 
-  response_main = requests.get(f'https://api.github.com/repos/{REPO_B_OWNER}/{REPO_B_NAME}/git/refs/heads/main', headers=headers)
-  if response_main.status_code == 200:
-    main_sha = response_main.json()['object']['sha']
-    create_tag_url = f'https://api.github.com/repos/{REPO_B_OWNER}/{REPO_B_NAME}/git/refs'
-    tag_data = {
-      'ref': f'refs/tags/{latest_tag}',
-      'sha': main_sha
-    }
-    print(f'Creating tag {latest_tag} with sha {main_sha}')
-    response_create_tag = requests.post(create_tag_url, json=tag_data, headers=headers)
-    if response_create_tag.status_code == 201:
-      print(f'Successfully created tag {latest_tag}')
 
-      workflow_dispatch_url = f'https://api.github.com/repos/{REPO_B_OWNER}/{REPO_B_NAME}/actions/workflows/build.yml/dispatches'
-      dispatch_data = {
-        "ref": "main",
-        "inputs": {
-          "version": latest_tag
-        }
-      }
-      response_dispatch = requests.post(workflow_dispatch_url, json=dispatch_data, headers=headers)
-      if response_dispatch.status_code == 204:
-        print(f'Successfully triggered build for tag {latest_tag}')
-      else:
-        print(f'Failed to trigger build: {response_dispatch.status_code}')
-        print(response_dispatch.json())
+def sync_tags(token=None):
+    session = github_session(token)
+
+    upstream_tags = list_tags(UPSTREAM_OWNER, UPSTREAM_REPO, session)
+    upstream_release_tags = sorted_release_tags(upstream_tags)
+    fork_tags = fork_tag_names(session)
+
+    new_tags = [tag for tag in upstream_release_tags if tag not in fork_tags]
+    if not new_tags:
+        print("No new tags found")
+        return 0
+
+    latest_tag = max(new_tags, key=parse_version)
+    print(f"Latest new tag: {latest_tag}")
+
+    upstream_sha = get_tag_commit_sha(
+        UPSTREAM_OWNER, UPSTREAM_REPO, latest_tag, session
+    )
+    created = create_fork_tag(latest_tag, upstream_sha, session)
+    if created:
+        print(f"Created tag {latest_tag} at upstream commit {upstream_sha[:7]}")
+        trigger_build(latest_tag, session)
+        print(f"Triggered build for {latest_tag}")
     else:
-      print(f'Failed to create tag: {response_create_tag.status_code}')
-      print(response_create_tag.json())
-  else:
-    print('Failed to get main branch sha')
-else:
-  print('No new tags found')
+        print(f"Tag {latest_tag} already exists")
+
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(sync_tags(os.getenv("GITHUB_TOKEN")))
+    except requests.HTTPError as error:
+        print(error, file=sys.stderr)
+        if error.response is not None:
+            print(error.response.text, file=sys.stderr)
+        raise SystemExit(1)
