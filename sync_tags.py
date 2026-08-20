@@ -13,11 +13,10 @@ from github_utils import (
     FORK_REPO,
     UPSTREAM_OWNER,
     UPSTREAM_REPO,
+    get_latest_release_tag,
     get_tag_commit_sha,
     github_session,
     list_tags,
-    parse_version,
-    sorted_release_tags,
 )
 
 
@@ -73,35 +72,34 @@ def trigger_build(tag_name, session):
 def sync_tags(token=None, dry_run=False):
     session = github_session(token)
 
-    upstream_tags = list_tags(UPSTREAM_OWNER, UPSTREAM_REPO, session)
-    upstream_release_tags = sorted_release_tags(upstream_tags)
+    upstream_latest_tag = get_latest_release_tag(UPSTREAM_OWNER, UPSTREAM_REPO, session)
     fork_tags = fork_tag_names(session)
 
-    new_tags = [tag for tag in upstream_release_tags if tag not in fork_tags]
-    if not new_tags:
-        print("No new tags found")
+    if upstream_latest_tag in fork_tags:
+        print(f"Latest upstream tag {upstream_latest_tag} already exists in fork")
         return 0
 
-    latest_tag = max(new_tags, key=parse_version)
-    print(f"Latest new tag: {latest_tag}")
+    print(f"Latest upstream tag: {upstream_latest_tag}")
 
     upstream_sha = get_tag_commit_sha(
-        UPSTREAM_OWNER, UPSTREAM_REPO, latest_tag, session
+        UPSTREAM_OWNER, UPSTREAM_REPO, upstream_latest_tag, session
     )
     if dry_run:
         print(
-            f"[DRY-RUN] Would create tag {latest_tag} at upstream commit {upstream_sha[:7]}"
+            f"[DRY-RUN] Would create tag {upstream_latest_tag} at upstream commit {upstream_sha[:7]}"
         )
-        print(f"[DRY-RUN] Would trigger build for {latest_tag}")
+        print(f"[DRY-RUN] Would trigger build for {upstream_latest_tag}")
         return 0
 
-    created = create_fork_tag(latest_tag, upstream_sha, session)
+    created = create_fork_tag(upstream_latest_tag, upstream_sha, session)
     if created:
-        print(f"Created tag {latest_tag} at upstream commit {upstream_sha[:7]}")
-        trigger_build(latest_tag, session)
-        print(f"Triggered build for {latest_tag}")
+        print(
+            f"Created tag {upstream_latest_tag} at upstream commit {upstream_sha[:7]}"
+        )
+        trigger_build(upstream_latest_tag, session)
+        print(f"Triggered build for {upstream_latest_tag}")
     else:
-        print(f"Tag {latest_tag} already exists")
+        print(f"Tag {upstream_latest_tag} already exists")
 
     return 0
 
