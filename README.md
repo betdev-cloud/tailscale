@@ -55,6 +55,19 @@ Workflow `Create and publish artifacts` можно запустить вручн
 | `.github/workflows/sync-tags.yml` | Cron-синхронизация тегов |
 | `.github/workflows/build.yml` | Сборка и публикация release |
 
+## Dry-run проверка в PR
+
+Для pull request в `sync-tags.yml` добавлен отдельный job `sync_tags_dry_run`, который запускает:
+
+```bash
+python sync_tags.py --dry-run
+```
+
+В этом режиме скрипт получает список тегов из upstream, определяет последний новый stable-тег и выводит план действий, но **не**:
+
+- создаёт теги в форке;
+- запускает workflow сборки.
+
 ## Ограничения
 
 - Pre-release теги (`-pre`) игнорируются.

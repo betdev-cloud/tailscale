@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Mirror upstream Tailscale release tags into this fork and trigger builds."""
 
+import argparse
 import os
 import sys
 
@@ -46,7 +47,7 @@ def trigger_build(tag_name, session):
         response.raise_for_status()
 
 
-def sync_tags(token=None):
+def sync_tags(token=None, dry_run=False):
     session = github_session(token)
 
     upstream_tags = list_tags(UPSTREAM_OWNER, UPSTREAM_REPO, session)
@@ -64,6 +65,13 @@ def sync_tags(token=None):
     upstream_sha = get_tag_commit_sha(
         UPSTREAM_OWNER, UPSTREAM_REPO, latest_tag, session
     )
+    if dry_run:
+        print(
+            f"[DRY-RUN] Would create tag {latest_tag} at upstream commit {upstream_sha[:7]}"
+        )
+        print(f"[DRY-RUN] Would trigger build for {latest_tag}")
+        return 0
+
     created = create_fork_tag(latest_tag, upstream_sha, session)
     if created:
         print(f"Created tag {latest_tag} at upstream commit {upstream_sha[:7]}")
@@ -75,9 +83,22 @@ def sync_tags(token=None):
     return 0
 
 
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Sync stable upstream tags into fork and trigger build workflow."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned actions without creating tags or triggering workflows.",
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
     try:
-        raise SystemExit(sync_tags(os.getenv("GITHUB_TOKEN")))
+        args = parse_args()
+        raise SystemExit(sync_tags(os.getenv("GITHUB_TOKEN"), dry_run=args.dry_run))
     except requests.HTTPError as error:
         print(error, file=sys.stderr)
         if error.response is not None:
