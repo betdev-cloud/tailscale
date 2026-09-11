@@ -3,7 +3,6 @@
 
 import argparse
 import os
-import subprocess
 import sys
 
 import requests
@@ -25,39 +24,33 @@ def fork_tag_names(session):
     return {tag["name"] for tag in tags}
 
 
-def create_fork_tag(tag_name, sha, session):
-    # The upstream release tag can point to an object missing from the fork.
-    # Mirror the tag through git so the referenced object is transferred too.
-    del sha, session
-    upstream_url = f"https://github.com/{UPSTREAM_OWNER}/{UPSTREAM_REPO}.git"
-    remotes = subprocess.run(
-        ["git", "remote"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    if "upstream" not in remotes.stdout.split():
-        subprocess.run(
-            ["git", "remote", "add", "upstream", upstream_url],
-            check=True,
-        )
+def fork_default_branch_sha(session):
+    """Return the commit SHA at the tip of this repository's default branch."""
+    repo = session.get(f"https://api.github.com/repos/{FORK_OWNER}/{FORK_REPO}")
+    repo.raise_for_status()
+    default_branch = repo.json()["default_branch"]
 
-    subprocess.run(
-        ["git", "fetch", "--depth=1", "upstream", f"refs/tags/{tag_name}:refs/tags/{tag_name}"],
-        check=True,
+    ref = session.get(
+        f"https://api.github.com/repos/{FORK_OWNER}/{FORK_REPO}/git/ref/heads/{default_branch}"
     )
+    ref.raise_for_status()
+    return ref.json()["object"]["sha"], default_branch
 
-    push = subprocess.run(
-        ["git", "push", "origin", f"refs/tags/{tag_name}"],
-        check=False,
-        capture_output=True,
-        text=True,
+
+def create_fork_tag(tag_name, target_sha, session):
+    # This repository is not a git fork of tailscale/tailscale and does not
+    # contain upstream objects. Point the release tag at a commit that already
+    # exists here; build.yml resolves the real upstream commit by tag name.
+    response = session.post(
+        f"https://api.github.com/repos/{FORK_OWNER}/{FORK_REPO}/git/refs",
+        json={"ref": f"refs/tags/{tag_name}", "sha": target_sha},
     )
-    if push.returncode == 0:
+    if response.status_code == 201:
         return True
-    if "already exists" in (push.stdout + push.stderr):
+    if response.status_code == 422 and "Reference already exists" in response.text:
         return False
-    raise RuntimeError(f"Failed to push tag {tag_name}: {push.stderr or push.stdout}")
+    response.raise_for_status()
+    return True
 
 
 def trigger_build(tag_name, session):
@@ -84,17 +77,20 @@ def sync_tags(token=None, dry_run=False):
     upstream_sha = get_tag_commit_sha(
         UPSTREAM_OWNER, UPSTREAM_REPO, upstream_latest_tag, session
     )
+    target_sha, branch = fork_default_branch_sha(session)
     if dry_run:
         print(
-            f"[DRY-RUN] Would create tag {upstream_latest_tag} at upstream commit {upstream_sha[:7]}"
+            f"[DRY-RUN] Would create tag {upstream_latest_tag} at {branch} ({target_sha[:7]}); "
+            f"upstream commit is {upstream_sha[:7]}"
         )
         print(f"[DRY-RUN] Would trigger build for {upstream_latest_tag}")
         return 0
 
-    created = create_fork_tag(upstream_latest_tag, upstream_sha, session)
+    created = create_fork_tag(upstream_latest_tag, target_sha, session)
     if created:
         print(
-            f"Created tag {upstream_latest_tag} at upstream commit {upstream_sha[:7]}"
+            f"Created tag {upstream_latest_tag} at {branch} ({target_sha[:7]}); "
+            f"upstream commit is {upstream_sha[:7]}"
         )
         trigger_build(upstream_latest_tag, session)
         print(f"Triggered build for {upstream_latest_tag}")
