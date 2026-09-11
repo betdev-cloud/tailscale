@@ -130,7 +130,7 @@ Triggered by `workflow_dispatch` with a required `version` input.
 
 1. Resolves the upstream commit SHA for the given tag.
 2. Detects the Go toolchain version from the upstream `go.mod`.
-3. Generates release notes with `fetch_changelog.py` and uploads them as an artifact.
+3. Generates release notes with `fetch_changelog.py` (includes the official changelog link) and creates/updates the GitHub Release body.
 
 **`build-and-publish` job (matrix):**
 
