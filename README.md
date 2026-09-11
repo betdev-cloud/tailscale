@@ -5,7 +5,7 @@ A fork repository that automatically mirrors stable [tailscale/tailscale](https:
 ## How it works
 
 1. **`sync-tags.yml`** runs on an hourly schedule and checks for new stable tags in the upstream repository.
-2. **`sync_tags.py`** mirrors the latest upstream release tag into this fork, pointing to the **upstream commit** rather than `main`.
+2. **`sync_tags.py`** creates a matching release tag in this repository on the tip of `main`. This repo is not a git fork of upstream and does not store upstream objects; `build.yml` resolves the real upstream commit by tag name.
 3. After the tag is created, **`build.yml`** is triggered automatically. It builds `tailscale`, `tailscaled`, `derper`, and `derpprobe` from upstream source and publishes a GitHub Release.
 
 ```
@@ -63,7 +63,7 @@ GITHUB_TOKEN=<token> uv run python sync_tags.py
 
 ```
 Latest upstream tag: v1.102.3
-[DRY-RUN] Would create tag v1.102.3 at upstream commit abc1234
+[DRY-RUN] Would create tag v1.102.3 at main (741e536); upstream commit is abc1234
 [DRY-RUN] Would trigger build for v1.102.3
 ```
 
@@ -163,7 +163,7 @@ Shared constants and helper functions used by both scripts.
 |---|---|
 | `sync_tags(token, dry_run)` | Main entry point: compares upstream vs fork tags and syncs if needed |
 | `fork_tag_names(session)` | Returns the set of tag names already present in the fork |
-| `create_fork_tag(tag_name, sha, session)` | Shallow-fetches the tag from upstream via git and pushes it to the fork |
+| `create_fork_tag(tag_name, sha, session)` | Creates a lightweight tag on this repo's default branch tip via the GitHub API |
 | `trigger_build(tag_name, session)` | Dispatches `build.yml` with the given version |
 
 ### `fetch_changelog.py`
