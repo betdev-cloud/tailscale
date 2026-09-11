@@ -14,7 +14,6 @@ jobs:
     permissions:
       contents: write
     outputs:
-      release_body_path: ${{ steps.changelog.outputs.release_body_path }}
       upstream_sha: ${{ steps.upstream.outputs.upstream_sha }}
       go_version: ${{ steps.upstream.outputs.go_version }}
     steps:
@@ -81,13 +80,22 @@ jobs:
           VERSION: ${{ github.event.inputs.version }}
         run: |
           uv run python fetch_changelog.py "$VERSION" -o release-notes.md
-          echo "release_body_path=release-notes.md" >> "$GITHUB_OUTPUT"
 
-      - name: Upload release notes
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-notes
-          path: release-notes.md
+      # upload-release-action@v2 no longer accepts body_path; create/update the
+      # release notes once here so matrix asset uploads cannot race an empty body.
+      - name: Create or update GitHub release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release edit "$VERSION" --notes-file release-notes.md --latest
+          else
+            gh release create "$VERSION" \
+              --title "$VERSION" \
+              --notes-file release-notes.md \
+              --latest
+          fi
 
   build-and-publish:
     needs: prepare-release
@@ -111,11 +119,6 @@ jobs:
         with:
           repository: tailscale/tailscale
           ref: ${{ github.event.inputs.version }}
-
-      - name: Download release notes
-        uses: actions/download-artifact@v8
-        with:
-          name: release-notes
 
       - name: Setup Golang
         uses: actions/setup-go@v7
@@ -141,5 +144,4 @@ jobs:
           asset_name: ${{ matrix.binary }}
           tag: ${{ github.event.inputs.version }}
           overwrite: true
-          body_path: release-notes.md
           make_latest: true
